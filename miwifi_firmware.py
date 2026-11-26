@@ -248,17 +248,25 @@ def head_size(url, timeout=30):
         return 0
 
 
-def download(url, dest, resume=True):
+def download(url, dest, resume=True, retries=3):
     """下载到 dest；已存在且大小一致则跳过。返回 (状态, 字节数)。
 
     状态: ok=已下载, skip=已存在, missing=源站已删除(404/410)。
     """
-    try:
-        return _download(url, dest, resume)
-    except urllib.error.HTTPError as e:
-        if e.code in (403, 404, 410):
-            return "missing", 0
-        raise
+    for attempt in range(retries):
+        try:
+            return _download(url, dest, resume)
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404, 410):
+                return "missing", 0
+            if 400 <= e.code < 500 and e.code != 429:
+                raise
+            if attempt + 1 >= retries:
+                raise
+        except Exception:  # noqa: BLE001 下载失败后重试
+            if attempt + 1 >= retries:
+                raise
+        time.sleep(60)
 
 
 def _download(url, dest, resume=True):
@@ -365,7 +373,7 @@ def run(codes, out_dir, workers=4, json_only=False, force=False, timeout=60, ret
     def job(dest, url):
         if force and os.path.exists(dest):
             os.remove(dest)
-        return download(url, dest)
+        return download(url, dest, retries=retries)
 
     done = 0
     with futures.ThreadPoolExecutor(max_workers=workers) as pool:

@@ -52,16 +52,24 @@ runs:
             "| --- | --- | --- |",
         ]
         for item in items:
+            version = cell(item.get("version"))
+            if not version:
+                continue
             ts = item.get("time")
             date = datetime.datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d") if ts else ""
-            filename = item.get("url", "").rsplit("/", 1)[-1]
-            lines.append(f"| {cell(item.get('version'))} | {date} | `{cell(filename)}` |")
+            filename = cell((item.get("url") or "").rsplit("/", 1)[-1])
+            firmware = f"`{filename}`" if filename else "Unavailable for download"
+            lines.append(f"| {version} | {date} | {firmware} |")
         print("\n".join(lines))
         PY
+        prerelease=()
+        if [[ "$TYPE" =~ DEV(-[A-Z0-9]+)?$ ]]; then
+          prerelease=(--prerelease)
+        fi
         if gh release view "$TYPE" >/dev/null 2>&1; then
-          gh release edit "$TYPE" --title "$TYPE" --notes-file notes.md
+          gh release edit "$TYPE" --title "$TYPE" --notes-file notes.md "${prerelease[@]}"
         else
-          gh release create "$TYPE" --title "$TYPE" --notes-file notes.md --latest=false
+          gh release create "$TYPE" --title "$TYPE" --notes-file notes.md --latest=false "${prerelease[@]}"
         fi
 
     - name: Upload firmware
