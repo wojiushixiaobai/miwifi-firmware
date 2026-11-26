@@ -14,7 +14,7 @@ python3 miwifi_firmware.py --discover          # 发现新型号并下载
 python3 miwifi_firmware.py --discover-only     # 更新型号列表
 ```
 
-默认跳过工具和客户端，使用 `--include-tools` 可一并下载。完整参数见 `python3 miwifi_firmware.py --help`。
+完整参数见 `python3 miwifi_firmware.py --help`。
 
 固件保存在 `firmware/型号代号/版本/`，接口数据保存在对应型号目录。重复运行会跳过已下载的文件，支持断点续传。
 

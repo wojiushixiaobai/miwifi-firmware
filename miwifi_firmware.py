@@ -6,10 +6,8 @@ miwifi_firmware.py —— 小米路由器（MiWiFi）固件抓取/下载工具
 数据源:
     https://api.miwifi.com/upgrade/log/list?typeList=<型号代号>
 
-型号代号 = 设备型号 + 渠道后缀，例如 RC01STA / R3GDEV / R2DUSB / R1DIP。
-后缀含义（已知）: STA=稳定版, DEV=开发版, USB=USB 恢复/刷机包,
-                  IP=iPhone 客户端, MAC=Mac 客户端, PC=PC 客户端,
-                  AN Android 客户端, DIP=?, 以及 -TW/-HK 地区版。
+型号代号 = 设备型号 + 渠道后缀，例如 RC01STA / R3GDEV / R2DUSB。
+后缀含义: STA=稳定版, DEV=开发版, USB=USB 恢复/刷机包，以及 -TW/-HK 地区版。
 
 用法:
     python3 miwifi_firmware.py                    # 下载全部已知型号
@@ -49,7 +47,7 @@ KNOWN_TYPES = [
     "D01STA",
     "R1350STA",
     "R1CDEV", "R1CLDEV", "R1CLSTA", "R1CSTA", "R1CUSB",
-    "R1DANDEV", "R1DANSTA", "R1DDEV", "R1DIP", "R1DMAC", "R1DPC",
+    "R1DDEV",
     "R1DSTA", "R1DUSB", "R1DUSB2",
     "R2100STA", "R2350STA",
     "R2DDEV", "R2DSTA", "R2DUSB",
@@ -66,17 +64,10 @@ KNOWN_TYPES = [
     "RC01STA", "RC06STA",
     "RD01STA", "RD02STA", "RD03STA", "RD04STA", "RD08STA", "RD15STA", "RD16STA", "RD18STA",
     "RM1800STA", "RM2100STA",
-    "TFTPPC", "WiFiAN", "WiFiPC",
 ]
 
-# 工具/客户端类代号：官方公开下载，默认不归档（--include-tools 可强制包含）
-TOOL_TYPES = {
-    "TFTPPC", "WiFiAN", "WiFiPC",
-    "R1DIP", "R1DMAC", "R1DPC", "R1DANSTA", "R1DANDEV",
-}
-
-# 遍历用：已知的渠道后缀（STA/DEV/USB 是固件，其余是客户端/工具）
-DEVICE_SUFFIXES = ["STA", "DEV", "USB", "DIP", "IP", "MAC", "PC", "AN", "TFTP", "WiFi"]
+# 遍历用的固件渠道后缀
+DEVICE_SUFFIXES = ["STA", "DEV", "USB"]
 # 新设备型号探测时只尝试与固件相关的后缀
 FIRMWARE_SUFFIXES = ["STA", "DEV"]
 # 境外版本只探测台湾（官方海外站仅此一个）
@@ -249,6 +240,11 @@ def head_size(url, timeout=30):
         return 0
 
 
+def is_client_package(url):
+    path = urllib.parse.urlparse(url).path
+    return os.path.splitext(path)[1].lower() in {".exe", ".apk", ".dmg", ".pkg"}
+
+
 def download(url, dest, resume=True, retries=3):
     """下载到 dest；已存在且大小一致则跳过。返回 (状态, 字节数)。
 
@@ -351,7 +347,7 @@ def run(codes, out_dir, workers=4, json_only=False, force=False, timeout=60, ret
             url = (item.get("url") or "").strip()
             # 个别 URL 内含零宽字符等非 ASCII 字符，urllib 会直接报错
             url = "".join(ch for ch in url if 32 < ord(ch) < 127)
-            if not url:
+            if not url or is_client_package(url):
                 continue
             version = safe_name(item.get("version"))
             filename = safe_name(os.path.basename(urllib.parse.urlparse(url).path), "firmware.bin")
@@ -422,7 +418,6 @@ def main(argv=None):
     parser.add_argument("--discover-only", action="store_true", help="只遍历发现型号，写入 types.txt")
     parser.add_argument("-j", "--workers", type=int, default=4, help="下载并发数（默认 4）")
     parser.add_argument("--force", action="store_true", help="强制重新下载已存在的固件")
-    parser.add_argument("--include-tools", action="store_true", help="连同工具/客户端类代号一起下载（默认忽略）")
     parser.add_argument("--skip-existing-list", help="文件名列表（每行一个），命中则跳过下载（用于跳过 release 已有资产）")
     parser.add_argument("--timeout", type=int, default=60, help="HTTP 超时秒数")
     parser.add_argument("--retries", type=int, default=3, help="重试次数")
@@ -451,12 +446,6 @@ def main(argv=None):
         codes = merged
         if args.discover_only:
             return 0
-
-    if not args.include_tools:
-        tools = [c for c in codes if c in TOOL_TYPES]
-        if tools:
-            print(f"[skip] 忽略工具/客户端类: {', '.join(tools)}", flush=True)
-        codes = [c for c in codes if c not in TOOL_TYPES]
 
     skip_names = set()
     if args.skip_existing_list and os.path.exists(args.skip_existing_list):

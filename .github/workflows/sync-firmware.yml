@@ -61,13 +61,7 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import re
-          import sys
-          from miwifi_firmware import TOOL_TYPES
-
           types = [l.strip() for l in open('types.txt', encoding='utf-8') if l.strip()]
-          tools = [t for t in types if t in TOOL_TYPES]
-          types = [t for t in types if t not in TOOL_TYPES]
-          print(f"Ignored {len(tools)} tools/clients: {', '.join(tools)}", file=sys.stderr)
           overseas = [t for t in types if re.search(r'-[A-Z]{2,4}$', t)]
           domestic = [t for t in types if t not in overseas]
           print('types=' + json.dumps(domestic, separators=(',', ':')))

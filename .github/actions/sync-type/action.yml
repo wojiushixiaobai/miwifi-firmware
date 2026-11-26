@@ -40,6 +40,7 @@ runs:
         set -euo pipefail
         python3 - "$TYPE" > notes.md <<'PY'
         import datetime, json, re, sys
+        from miwifi_firmware import is_client_package
 
         code = sys.argv[1]
         data = json.load(open(f"dist/{code}/{code}.json", encoding="utf-8"))
@@ -55,7 +56,7 @@ runs:
         ]
         for item in items:
             version = cell(item.get("version"))
-            if not version:
+            if not version or is_client_package(item.get("url") or ""):
                 continue
             ts = item.get("time")
             date = datetime.datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d") if ts else ""
