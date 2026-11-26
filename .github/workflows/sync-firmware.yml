@@ -1,0 +1,115 @@
+name: MiWiFi Firmware Sync
+
+on:
+  schedule:
+    - cron: "0 19 1 * *"
+  workflow_dispatch:
+    inputs:
+      types:
+        description: "Comma-separated model codes; leave empty for all"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: miwifi-firmware
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      types: ${{ steps.list.outputs.types }}
+      overseas: ${{ steps.list.outputs.overseas }}
+      has_overseas: ${{ steps.list.outputs.has_overseas }}
+      count: ${{ steps.list.outputs.count }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Discover model codes
+        if: github.event_name != 'workflow_dispatch' || inputs.types == ''
+        run: python3 miwifi_firmware.py --discover-only --types-file types.txt
+
+      - name: Use specified model codes
+        if: github.event_name == 'workflow_dispatch' && inputs.types != ''
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${{ inputs.types }}" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sort -u > types.txt
+
+      - name: Build domestic and overseas matrices
+        id: list
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import re
+          import sys
+          from miwifi_firmware import TOOL_TYPES
+
+          types = [l.strip() for l in open('types.txt', encoding='utf-8') if l.strip()]
+          tools = [t for t in types if t in TOOL_TYPES]
+          types = [t for t in types if t not in TOOL_TYPES]
+          print(f"Ignored {len(tools)} tools/clients: {', '.join(tools)}", file=sys.stderr)
+          overseas = [t for t in types if re.search(r'-[A-Z]{2,4}$', t)]
+          domestic = [t for t in types if t not in overseas]
+          print('types=' + json.dumps(domestic, separators=(',', ':')))
+          print('overseas=' + json.dumps(overseas, separators=(',', ':')))
+          print('has_overseas=' + ('1' if overseas else '0'))
+          print('count=' + str(len(domestic) + len(overseas)))
+          PY
+
+      - name: Upload model list
+        uses: actions/upload-artifact@v7
+        with:
+          name: types
+          path: types.txt
+          retention-days: 30
+
+  publish:
+    name: ${{ matrix.type }}
+    needs: discover
+    if: needs.discover.outputs.types != '' && needs.discover.outputs.types != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        type: ${{ fromJSON(needs.discover.outputs.types) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/sync-type
+        with:
+          type: ${{ matrix.type }}
+
+  publish-overseas:
+    name: ${{ matrix.type }}
+    needs: [discover, publish]
+    if: >
+      always() && needs.discover.result == 'success' &&
+      needs.discover.outputs.has_overseas == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        type: ${{ fromJSON(needs.discover.outputs.overseas) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/sync-type
+        with:
+          type: ${{ matrix.type }}

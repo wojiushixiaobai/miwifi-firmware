@@ -1,0 +1,93 @@
+name: Sync
+description: Download and publish firmware for a model
+
+inputs:
+  type:
+    description: Model code, e.g. RC01STA
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: List existing release assets
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TYPE: ${{ inputs.type }}
+      run: |
+        set -euo pipefail
+        mkdir -p dist
+        : > existing.txt
+        if gh release view "$TYPE" >/dev/null 2>&1; then
+          gh release view "$TYPE" --json assets --jq '.assets[].name' >> existing.txt
+        fi
+        echo "Existing assets: $(wc -l < existing.txt)"
+
+    - name: Download missing firmware and JSON
+      shell: bash
+      env:
+        TYPE: ${{ inputs.type }}
+      run: python3 miwifi_firmware.py -t "$TYPE" -o dist --skip-existing-list existing.txt
+
+    - name: Create or update release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TYPE: ${{ inputs.type }}
+      run: |
+        set -euo pipefail
+        python3 - "$TYPE" > notes.md <<'PY'
+        import datetime, json, re, sys
+
+        code = sys.argv[1]
+        data = json.load(open(f"dist/{code}/{code}.json", encoding="utf-8"))
+        items = data["data"]["list"]
+        tz = datetime.timezone(datetime.timedelta(hours=8))
+
+        def cell(text):
+            return re.sub(r"[|\r\n]+", " ", str(text or "")).strip()
+
+        lines = [
+            "| Version | Release date | Firmware |",
+            "| --- | --- | --- |",
+        ]
+        for item in items:
+            ts = item.get("time")
+            date = datetime.datetime.fromtimestamp(ts / 1000, tz).strftime("%Y-%m-%d") if ts else ""
+            filename = item.get("url", "").rsplit("/", 1)[-1]
+            lines.append(f"| {cell(item.get('version'))} | {date} | `{cell(filename)}` |")
+        print("\n".join(lines))
+        PY
+        if gh release view "$TYPE" >/dev/null 2>&1; then
+          gh release edit "$TYPE" --title "$TYPE" --notes-file notes.md
+        else
+          gh release create "$TYPE" --title "$TYPE" --notes-file notes.md --latest=false
+        fi
+
+    - name: Upload firmware
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TYPE: ${{ inputs.type }}
+      run: |
+        set -euo pipefail
+        uploaded=0
+        failed=0
+        while IFS= read -r -d '' file; do
+          name=$(basename "$file")
+          if grep -Fxq "$name" existing.txt; then
+            continue
+          fi
+          if gh release upload "$TYPE" "$file"; then
+            uploaded=$((uploaded + 1))
+            echo "$name" >> existing.txt
+          else
+            echo "::warning::Upload failed: $name"
+            failed=$((failed + 1))
+          fi
+        done < <(find dist -type f ! -name '*.json' ! -name '*.part' \
+                       ! -name '_dl_failed.txt' ! -name '_json_failed.txt' -print0)
+        echo "Uploaded: $uploaded, failed: $failed"
+        if [ "$failed" -gt 0 ]; then
+          exit 1
+        fi
