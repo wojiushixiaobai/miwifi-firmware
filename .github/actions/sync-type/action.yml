@@ -24,6 +24,8 @@ runs:
         echo "Existing assets: $(wc -l < existing.txt)"
 
     - name: Download missing firmware and JSON
+      id: download
+      continue-on-error: true
       shell: bash
       env:
         TYPE: ${{ inputs.type }}
@@ -72,6 +74,16 @@ runs:
           gh release create "$TYPE" --title "$TYPE" --notes-file notes.md --latest=false "${prerelease[@]}"
         fi
 
+    - name: Upload missing JSON
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TYPE: ${{ inputs.type }}
+      run: |
+        if ! grep -Fxq "$TYPE.json" existing.txt; then
+          gh release upload "$TYPE" "dist/$TYPE/$TYPE.json" --clobber
+        fi
+
     - name: Upload firmware
       shell: bash
       env:
@@ -99,6 +111,11 @@ runs:
         if [ "$failed" -gt 0 ]; then
           exit 1
         fi
-        if [ "$uploaded" -gt 0 ] || ! grep -Fxq "$TYPE.json" existing.txt; then
+        if [ "$uploaded" -gt 0 ] && grep -Fxq "$TYPE.json" existing.txt; then
           gh release upload "$TYPE" "dist/$TYPE/$TYPE.json" --clobber
         fi
+
+    - name: Check download result
+      if: steps.download.outcome == 'failure'
+      shell: bash
+      run: exit 1

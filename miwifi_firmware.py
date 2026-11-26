@@ -31,6 +31,7 @@ import json
 import os
 import queue
 import re
+import socket
 import string
 import sys
 import threading
@@ -251,7 +252,7 @@ def head_size(url, timeout=30):
 def download(url, dest, resume=True, retries=3):
     """下载到 dest；已存在且大小一致则跳过。返回 (状态, 字节数)。
 
-    状态: ok=已下载, skip=已存在, missing=源站已删除(404/410)。
+    状态: ok=已下载, skip=已存在, missing=源站缺失, dns=域名无法解析。
     """
     for attempt in range(retries):
         try:
@@ -263,8 +264,11 @@ def download(url, dest, resume=True, retries=3):
                 raise
             if attempt + 1 >= retries:
                 raise
-        except Exception:  # noqa: BLE001 下载失败后重试
+        except Exception as e:  # noqa: BLE001 下载失败后重试
             if attempt + 1 >= retries:
+                reason = e.reason if isinstance(e, urllib.error.URLError) else e
+                if isinstance(reason, socket.gaierror):
+                    return "dns", 0
                 raise
         time.sleep(60)
 
@@ -385,6 +389,9 @@ def run(codes, out_dir, workers=4, json_only=False, force=False, timeout=60, ret
                 status, size = fut.result()
                 if status == "skip":
                     stats["skipped"] += 1
+                elif status == "dns":
+                    stats["skipped"] += 1
+                    print(f"[跳过] {label} 域名无法解析", flush=True)
                 elif status == "missing":
                     stats["missing"] += 1
                     print(f"[缺失] {label} 源站已删除", flush=True)
