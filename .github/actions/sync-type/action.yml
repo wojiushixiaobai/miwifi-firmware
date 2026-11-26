@@ -91,3 +91,6 @@ runs:
         if [ "$failed" -gt 0 ]; then
           exit 1
         fi
+        if [ "$uploaded" -gt 0 ] || ! grep -Fxq "$TYPE.json" existing.txt; then
+          gh release upload "$TYPE" "dist/$TYPE/$TYPE.json" --clobber
+        fi
